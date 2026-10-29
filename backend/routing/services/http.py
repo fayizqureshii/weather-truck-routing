@@ -20,8 +20,11 @@ def session() -> requests.Session:
     retry = Retry(
         total=3,
         backoff_factor=0.5,
-        status_forcelist=(429, 500, 502, 503, 504),
+        # 429 is not retried: a rate-limited provider stays limited for minutes, and the
+        # weather module falls back to a second provider instead of waiting.
+        status_forcelist=(500, 502, 503, 504),
         allowed_methods=("GET",),
+        respect_retry_after_header=False,
     )
     adapter = HTTPAdapter(max_retries=retry, pool_maxsize=16)
     s.mount("https://", adapter)

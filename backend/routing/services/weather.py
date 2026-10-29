@@ -7,6 +7,7 @@ at the timestamp, so a rate in in/hr. Wind is an instantaneous value at the time
 from __future__ import annotations
 
 import hashlib
+import logging
 import math
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -15,11 +16,16 @@ from datetime import datetime, timedelta, timezone
 from django.conf import settings
 from django.core.cache import cache
 
+from . import metno
 from .geo import LatLon
 from .http import UpstreamError, get_json
 
 HOURLY_VARS = ("wind_speed_10m", "wind_gusts_10m", "rain", "snowfall", "temperature_2m", "weather_code")
 POINTS_PER_REQUEST = 50
+OPEN_METEO_BLOCKED_KEY = "wx:open-meteo-blocked"
+BLOCK_MINUTES = 10
+
+logger = logging.getLogger(__name__)
 MAX_FORECAST_DAYS = 16
 
 
@@ -138,8 +144,35 @@ def forecasts(points: list[LatLon], start: datetime, hours: int) -> list[Forecas
         unique.setdefault((round(lat, 2), round(lon, 2)), len(unique))
     keys = list(unique)
 
-    chunks = [keys[i : i + POINTS_PER_REQUEST] for i in range(0, len(keys), POINTS_PER_REQUEST)]
-    with ThreadPoolExecutor(max_workers=4) as pool:
-        results = list(pool.map(lambda c: _fetch_chunk(c, start, end), chunks))
-    by_key = [Forecast(start, hourly) for chunk in results for hourly in chunk]
+    by_key = [Forecast(start, h) for h in _hourly_for(keys, start, end)]
     return [by_key[unique[(round(lat, 2), round(lon, 2))]] for lat, lon in points]
+
+
+def _hourly_for(keys: list[LatLon], start: datetime, end: datetime) -> list[dict]:
+    """Open-Meteo first; MET Norway if Open-Meteo refuses (e.g. a rate-limited shared IP)."""
+    if not cache.get(OPEN_METEO_BLOCKED_KEY):
+        chunks = [keys[i : i + POINTS_PER_REQUEST] for i in range(0, len(keys), POINTS_PER_REQUEST)]
+        try:
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                results = list(pool.map(lambda c: _fetch_chunk(c, start, end), chunks))
+            return [h for chunk in results for h in chunk]
+        except UpstreamError:
+            logger.warning("Open-Meteo unavailable; using MET Norway for the next %d min", BLOCK_MINUTES)
+            cache.set(OPEN_METEO_BLOCKED_KEY, True, BLOCK_MINUTES * 60)
+    return _metno_hourly(keys, start, end)
+
+
+def _metno_hourly(keys: list[LatLon], start: datetime, end: datetime) -> list[dict]:
+    def one(point: LatLon) -> dict:
+        key = "metno:" + hashlib.sha1(
+            f"{start:%Y%m%d%H}:{end:%Y%m%d%H}:{point[0]:.2f},{point[1]:.2f}".encode()
+        ).hexdigest()
+        cached = cache.get(key)
+        if cached is None:
+            cached = metno.hourly(point, start, end)
+            cache.set(key, cached, 60 * 15)
+        return cached
+
+    # MET Norway takes one point per request; it asks clients to stay under 20 requests/s.
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        return list(pool.map(one, keys))

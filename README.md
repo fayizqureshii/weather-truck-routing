@@ -76,6 +76,7 @@ Django REST Framework  (backend/routing)
   ├─ geocoding.py   Photon (OpenStreetMap) search
   ├─ routing.py     OSRM routes, alternative generation, checkpoint sampling, heatmap grid
   ├─ weather.py     Open-Meteo hourly forecasts, batched, cached 15 min
+  ├─ metno.py       MET Norway fallback when Open-Meteo is rate-limited
   ├─ risk.py        threshold + load rules (pure functions)
   ├─ ranking.py     miles per risk level, recommendation order, explanation
   └─ planner.py     ties it together into the response
@@ -112,6 +113,13 @@ routes overlap a lot. Values are read at the truck's ETA:
 - **Rain / snowfall** (in/hr) come from the hourly bucket **the truck is driving through**.
   Open-Meteo stamps each precipitation value at the *end* of its hour, so an ETA of 14:20 uses
   the 15:00 value, which covers 14:00–15:00.
+
+**Fallback provider.** On hosts that share outbound IPs (Render's free tier, for example),
+Open-Meteo can rate-limit the IP before this app sends anything. If Open-Meteo fails, the backend
+switches to **MET Norway's Locationforecast** (api.met.no, free and keyless) for 10 minutes. Its
+data is converted to the same shape (`metno.py`): mph, in/hr, the same end-of-hour precipitation
+convention, and precipitation counted as snow at or below 0 °C (10:1 ratio). MET Norway has no
+gust value, and it forecasts about 9 days ahead, so very late departures need Open-Meteo.
 
 ### 4. Risk rules
 
@@ -190,7 +198,7 @@ than Route B (0 vs 50 mi)"* or *"Weather risk equivalent to Route B, and faster 
   mandatory rest, which shifts later checkpoints to later forecast hours.
 - **Wind** uses the sustained 10 m wind speed, as the thresholds read. Gusts are shown in checkpoint
   popups for context but are not scored.
-- Free public services (OSRM demo server, Photon, Open-Meteo) have rate limits and no uptime
+- Free public services (OSRM demo server, Photon, Open-Meteo, MET Norway) have rate limits and no uptime
   guarantee. Their URLs are configurable via environment variables.
 - Departure must be within 13 days, so every ETA falls inside Open-Meteo's 16-day forecast.
 

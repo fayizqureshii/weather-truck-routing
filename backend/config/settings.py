@@ -92,10 +92,12 @@ CORS_ALLOWED_ORIGINS = [
 OSRM_URL = os.environ.get("OSRM_URL", "https://router.project-osrm.org")
 PHOTON_URL = os.environ.get("PHOTON_URL", "https://photon.komoot.io")
 OPEN_METEO_URL = os.environ.get("OPEN_METEO_URL", "https://api.open-meteo.com")
+METNO_URL = os.environ.get("METNO_URL", "https://api.met.no")  # fallback weather provider
 # Optional commercial key; set OPEN_METEO_URL=https://customer-api.open-meteo.com alongside it.
 OPEN_METEO_API_KEY = os.environ.get("OPEN_METEO_API_KEY", "")
 HTTP_USER_AGENT = os.environ.get(
-    "HTTP_USER_AGENT", "weather-aware-truck-routing/1.0 (assessment project)"
+    # MET Norway requires an identifying User-Agent with a contact point.
+    "HTTP_USER_AGENT", "weather-aware-truck-routing/1.0 github.com/fayizqureshii/weather-truck-routing"
 )
 HTTP_TIMEOUT_SECONDS = float(os.environ.get("HTTP_TIMEOUT_SECONDS", "20"))
 
